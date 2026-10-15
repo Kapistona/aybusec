@@ -24,6 +24,7 @@ Ogrenci icin giris noktasi budur.
 """
 
 import argparse
+import html as _html
 import json
 import os
 import re
@@ -727,6 +728,175 @@ def run_check(findings):
     return ok
 
 # ===========================================================================
+# HTML DASHBOARD  (self-contained, offline, SIFIR harici bagimlilik)
+# Renkler: dataviz dogrulanmis dark-surface paleti
+# ===========================================================================
+HTML_CSS = """
+:root{
+  --plane:#0d0d0d; --surface:#1a1a19; --surface2:#222221;
+  --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --ring:rgba(255,255,255,0.10);
+  --crit:#d03b3b; --high:#ec835a; --med:#fab219; --low:#0ca30c; --info:#898781;
+  --bar:#3987e5; --bar2:#d95926;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.5}
+.wrap{max-width:1100px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:22px;margin:0 0 2px} h2{font-size:15px;margin:0 0 14px;color:var(--ink2);
+  font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+.card{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:18px 20px;margin-bottom:18px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.kpi{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:16px 18px}
+.kpi .n{font-size:34px;font-weight:700;letter-spacing:-.02em}
+.kpi .l{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.kpi.crit .n{color:var(--crit)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.stack{display:flex;height:26px;border-radius:6px;overflow:hidden;gap:2px;margin:6px 0 14px}
+.stack > span{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--ink2)}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.bars{display:flex;flex-direction:column;gap:9px}
+.bar{display:grid;grid-template-columns:150px 1fr 44px;align-items:center;gap:10px;font-size:13px}
+.bar .lab{color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.track{background:var(--surface2);border-radius:4px;height:16px;overflow:hidden}
+.fill{height:100%;border-radius:4px}
+.bar .val{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:var(--surface2);border:1px solid var(--ring);border-radius:999px;
+  padding:4px 11px;font-size:12px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.tl{position:relative;margin-left:8px;padding-left:22px;border-left:2px solid var(--grid)}
+.tl .ev{position:relative;padding:4px 0 14px}
+.tl .ev:before{content:"";position:absolute;left:-28px;top:7px;width:11px;height:11px;border-radius:50%;
+  border:2px solid var(--surface)}
+.tl .ev .t{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.tl .ev .d{font-size:14px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;
+  letter-spacing:.05em;padding:8px 10px;border-bottom:1px solid var(--grid)}
+td{padding:9px 10px;border-bottom:1px solid var(--grid);vertical-align:top}
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.03em;color:#111}
+.b-crit{background:var(--crit);color:#fff} .b-high{background:var(--high)}
+.b-med{background:var(--med)} .b-low{background:var(--low);color:#fff} .b-info{background:var(--info)}
+.ent{color:var(--muted);font-size:12px}
+details summary{cursor:pointer;color:var(--bar);font-size:12px}
+details pre{background:var(--plane);border:1px solid var(--ring);border-radius:8px;padding:10px;
+  overflow:auto;font-size:11.5px;color:var(--ink2);margin:8px 0 0;white-space:pre-wrap;word-break:break-all}
+@media(max-width:720px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}
+  .bar{grid-template-columns:110px 1fr 40px}}
+"""
+
+SEV_CSS = {"critical": "crit", "high": "high", "medium": "med", "low": "low", "info": "info"}
+
+def _esc(s):
+    return _html.escape(str(s if s is not None else ""))
+
+def _hbars(data, var):
+    """data: [(label, value)] -> HTML div-bar grubu (tek renk, magnitude)."""
+    if not data:
+        return '<div class="ent">veri yok</div>'
+    mx = max(v for _, v in data) or 1
+    rows = []
+    for lab, v in data:
+        pct = max(2, round(v / mx * 100))
+        rows.append(
+            f'<div class="bar"><span class="lab" title="{_esc(lab)}">{_esc(lab)}</span>'
+            f'<div class="track"><div class="fill" style="width:{pct}%;background:var(--{var})"></div></div>'
+            f'<span class="val">{v}</span></div>')
+    return '<div class="bars">' + "".join(rows) + "</div>"
+
+def render_html(events, bad, findings):
+    sevc = Counter(f.severity for f in findings)
+    detc = Counter(f.detector for f in findings)
+    srcc = Counter(e.source for e in events)
+    hosts = set()
+    for f in findings:
+        h = f.entities.get("host")
+        if h:
+            hosts.add(h)
+    mitre = sorted({f.mitre for f in findings})
+    rng = (f"{events[0].ts:%Y-%m-%d %H:%M} — {events[-1].ts:%Y-%m-%d %H:%M}"
+           if events else "-")
+
+    # severity stacked bar (status renkleri) + legend
+    seg, leg = [], []
+    total_f = len(findings) or 1
+    for s in ("critical", "high", "medium", "low", "info"):
+        n = sevc.get(s, 0)
+        if not n:
+            continue
+        pct = n / total_f * 100
+        seg.append(f'<span style="width:{pct}%;background:var(--{SEV_CSS[s]})" '
+                   f'title="{s}: {n}"></span>')
+        leg.append(f'<span><i style="background:var(--{SEV_CSS[s]})"></i>{s} ({n})</span>')
+    stacked = f'<div class="stack">{"".join(seg)}</div><div class="legend">{"".join(leg)}</div>'
+
+    # timeline
+    tl = []
+    for f in sorted(findings, key=lambda x: (x.first_seen or datetime.max.replace(tzinfo=None))):
+        c = SEV_CSS[f.severity]
+        t = f.first_seen.strftime("%m-%d %H:%M") if f.first_seen else "??"
+        tl.append(f'<div class="ev" style="--dot:var(--{c})">'
+                  f'<style>.tl .ev:nth-of-type({len(tl)+1}):before{{background:var(--{c})}}</style>'
+                  f'<div class="t">{t}</div><div class="d">{_esc(f.title)}</div></div>')
+    timeline = '<div class="tl">' + "".join(tl) + "</div>"
+
+    # findings table
+    rows = []
+    for f in sorted(findings, key=lambda x: (-SEV_RANK[x.severity],
+                                             x.first_seen or datetime.max.replace(tzinfo=None))):
+        ent = ", ".join(f"{k}={v}" for k, v in f.entities.items())
+        evid = "".join(f"<pre>{_esc(e)}</pre>" for e in f.evidence)
+        det = "" if not evid else f'<details><summary>kanit ({len(f.evidence)})</summary>{evid}</details>'
+        rows.append(
+            f'<tr><td><span class="badge b-{SEV_CSS[f.severity]}">{f.severity}</span></td>'
+            f'<td>{_esc(f.detector)}</td>'
+            f'<td>{_esc(f.title)}<div class="ent">{_esc(ent)}</div>{det}</td>'
+            f'<td style="white-space:nowrap">{_esc(f.mitre.split(" - ")[0])}</td>'
+            f'<td class="val" style="text-align:right">{f.count}</td></tr>')
+    table = ('<table><thead><tr><th>Severity</th><th>Dedektor</th><th>Bulgu</th>'
+             '<th>MITRE</th><th>Olay</th></tr></thead><tbody>'
+             + "".join(rows) + "</tbody></table>")
+
+    chips = "".join(f'<span class="chip">{_esc(m)}</span>' for m in mitre)
+    crit = sevc.get("critical", 0)
+
+    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aybusec — Incident Dashboard</title><style>{HTML_CSS}</style></head>
+<body><div class="wrap">
+<h1>aybusec — Incident Dashboard</h1>
+<div class="sub">{len(events)} olay analiz edildi &nbsp;·&nbsp; {rng} &nbsp;·&nbsp; {len(findings)} bulgu</div>
+
+<div class="kpis">
+  <div class="kpi"><div class="n">{len(events)}</div><div class="l">Toplam Olay</div></div>
+  <div class="kpi"><div class="n">{len(findings)}</div><div class="l">Bulgu</div></div>
+  <div class="kpi crit"><div class="n">{crit}</div><div class="l">Kritik</div></div>
+  <div class="kpi"><div class="n">{len(hosts)}</div><div class="l">Etkilenen Host</div></div>
+</div>
+
+<div class="card"><h2>Severity Dagilimi</h2>{stacked}</div>
+
+<div class="grid2">
+  <div class="card"><h2>Dedektore Gore Bulgular</h2>
+    {_hbars(detc.most_common(), "bar")}</div>
+  <div class="card"><h2>Kaynaga Gore Olaylar</h2>
+    {_hbars(srcc.most_common(), "bar2")}</div>
+</div>
+
+<div class="card"><h2>MITRE ATT&amp;CK Kapsami</h2><div class="chips">{chips}</div></div>
+
+<div class="card"><h2>Incident Timeline</h2>{timeline}</div>
+
+<div class="card"><h2>Bulgular</h2>{table}</div>
+
+<div class="sub" style="margin-top:20px">aybusec · egitim amacli · sentetik veri · github.com/Kapistona/aybusec</div>
+</div></body></html>"""
+
+
+# ===========================================================================
 # RAPORLAMA
 # ===========================================================================
 def print_report(events, bad, findings):
@@ -775,6 +945,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Egitim amacli SIEM log dedektif araci")
     ap.add_argument("logfile", nargs="?", help="analiz edilecek log dosyasi")
     ap.add_argument("--json", metavar="DOSYA", help="bulgulari JSON olarak yaz")
+    ap.add_argument("--html", metavar="DOSYA", help="self-contained HTML dashboard uret")
     ap.add_argument("--only", help="sadece bu dedektorler (virgulle)")
     ap.add_argument("--exclude", help="bu dedektorleri atla (virgulle)")
     ap.add_argument("--list", action="store_true", help="dedektorleri listele ve cik")
@@ -844,6 +1015,12 @@ def main(argv=None):
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, ensure_ascii=False)
         print(f"\n{C.GRN}JSON yazildi:{C.RESET} {args.json}")
+
+    if args.html:
+        with open(args.html, "w", encoding="utf-8") as fh:
+            fh.write(render_html(events, bad, findings))
+        print(f"{C.GRN}HTML dashboard yazildi:{C.RESET} {args.html}  "
+              f"{C.DIM}(tarayicida ac){C.RESET}")
 
     # cikis kodu: kritik/high bulgu varsa 1 (CI/otomasyon icin)
     return 1 if any(f.severity in ("critical", "high") for f in findings) else 0

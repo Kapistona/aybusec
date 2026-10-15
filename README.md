@@ -51,6 +51,19 @@ python3 analyze.py siem_sample.log --only edr_endpoint,ssh_bruteforce
 python3 analyze.py siem_sample.log --exclude scanner_ua
 python3 analyze.py siem_sample.log --check         # cevap anahtarı ile doğrula (PASS/FAIL)
 python3 analyze.py siem_sample.log --json rapor.json
+python3 analyze.py siem_sample.log --html dashboard.html   # gorsel dashboard
+```
+
+### Dashboard
+
+`--html` ile tek dosyalık, **offline çalışan** (CDN/kütüphane yok) bir incident
+dashboard'u üretilir: KPI tile'ları (toplam olay / bulgu / kritik / etkilenen host),
+severity dağılımı, dedektör & kaynak bazlı grafikler, MITRE kapsamı, saldırı zaman
+çizelgesi ve kanıt satırları açılabilir bulgu tablosu. Projeksiyon / sunum için
+birebir. Üret, tarayıcıda aç:
+
+```bash
+python3 analyze.py siem_sample.log --html dashboard.html && open dashboard.html
 ```
 
 ### VirusTotal zenginleştirme (tek tıkla IOC sorgusu)
@@ -97,3 +110,4 @@ python3 analyze.py --vt --ip 8.8.8.8 --hash <sha256>   # log olmadan tek atış 
 - `analyze.py` — dedektif aracı (tek dosya, stdlib)
 - `siem_sample.log` — sentetik örnek SIEM log'u (~20K satır)
 - `gen_log.py` — örnek log'u üreten script (senaryoları/oranları değiştirmek için)
+- `dashboard.html` — örnek çıktı dashboard'u (araç `--html` ile yeniden üretir)
