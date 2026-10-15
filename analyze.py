@@ -807,7 +807,7 @@ def _hbars(data, var):
             f'<span class="val">{v}</span></div>')
     return '<div class="bars">' + "".join(rows) + "</div>"
 
-def render_html(events, bad, findings):
+def _tech_cards(events, bad, findings):
     sevc = Counter(f.severity for f in findings)
     detc = Counter(f.detector for f in findings)
     srcc = Counter(e.source for e in events)
@@ -863,13 +863,7 @@ def render_html(events, bad, findings):
     chips = "".join(f'<span class="chip">{_esc(m)}</span>' for m in mitre)
     crit = sevc.get("critical", 0)
 
-    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aybusec — Incident Dashboard</title><style>{HTML_CSS}</style></head>
-<body><div class="wrap">
-<h1>aybusec — Incident Dashboard</h1>
-<div class="sub">{len(events)} olay analiz edildi &nbsp;·&nbsp; {rng} &nbsp;·&nbsp; {len(findings)} bulgu</div>
-
+    return f"""
 <div class="kpis">
   <div class="kpi"><div class="n">{len(events)}</div><div class="l">Toplam Olay</div></div>
   <div class="kpi"><div class="n">{len(findings)}</div><div class="l">Bulgu</div></div>
@@ -891,9 +885,7 @@ def render_html(events, bad, findings):
 <div class="card"><h2>Incident Timeline</h2>{timeline}</div>
 
 <div class="card"><h2>Bulgular</h2>{table}</div>
-
-<div class="sub" style="margin-top:20px">aybusec · egitim amacli · sentetik veri · github.com/Kapistona/aybusec</div>
-</div></body></html>"""
+"""
 
 
 # ===========================================================================
@@ -987,7 +979,17 @@ EXEC_CSS = """
 .prio-row .ps b{color:var(--ink2);font-weight:600}
 """
 
-def render_exec_html(events, findings):
+NAV_CSS = """
+.nav{display:flex;gap:8px;margin:0 0 20px}
+.nav .tab{background:var(--surface);border:1px solid var(--ring);color:var(--ink2);
+  padding:9px 18px;border-radius:999px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit}
+.nav .tab:hover{color:var(--ink)}
+.nav .tab.active{background:var(--bar);color:#fff;border-color:var(--bar)}
+.view{animation:fade .18s ease}
+@keyframes fade{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+"""
+
+def _exec_cards(events, findings):
     # alan bazli topla
     agg = {k: {"findings": [], "score": 0} for k in DOMAINS}
     for f in findings:
@@ -1037,13 +1039,7 @@ def render_exec_html(events, findings):
              '<b>kimlik hirsizligi</b> &rarr; '
              f'<b>~{gb:.1f} GB veri sizintisi</b> &amp; C2 kanali.')
 
-    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>aybusec — Yonetici Risk Ozeti</title><style>{HTML_CSS}{EXEC_CSS}</style></head>
-<body><div class="wrap">
-<h1>Guvenlik Durumu — Yonetici Ozeti</h1>
-<div class="sub">{len(events)} olaylik telemetriden turetilmis risk degerlendirmesi · aybusec</div>
-
+    return f"""
 <div class="verdict">
   <div class="v">◆ GENEL DURUM: KRITIK — Aktif ihlal tespit edildi</div>
   <div class="vsub">Birden fazla kontrol alaninda dogrulanmis ele gecirme ve veri sizintisi mevcut. Acil yatirim gerekiyor.</div>
@@ -1061,8 +1057,41 @@ def render_exec_html(events, findings):
 
 <div class="card"><h2>Yatirim Oncelikleri</h2>{"".join(prio)}</div>
 
-<div class="sub" style="margin-top:20px">P1 = acil (bu ceyrek) · P2 = planli (6 ay) · P3 = iyilestirme · aybusec · sentetik veri</div>
-</div></body></html>"""
+<div class="sub" style="margin-top:20px">P1 = acil (bu ceyrek) · P2 = planli (6 ay) · P3 = iyilestirme</div>
+"""
+
+
+def render_html(events, bad, findings):
+    """Tek sayfa birlesik dashboard: Yonetici Ozeti + Teknik Detay (menu ile gecis)."""
+    rng = (f"{events[0].ts:%Y-%m-%d %H:%M} — {events[-1].ts:%Y-%m-%d %H:%M}"
+           if events else "-")
+    exc = _exec_cards(events, findings)
+    tech = _tech_cards(events, bad, findings)
+    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aybusec — Guvenlik Dashboard</title>
+<style>{HTML_CSS}{EXEC_CSS}{NAV_CSS}</style></head>
+<body><div class="wrap">
+<h1>aybusec — Guvenlik Dashboard</h1>
+<div class="sub">{len(events)} olay &nbsp;·&nbsp; {rng} &nbsp;·&nbsp; {len(findings)} bulgu</div>
+<div class="nav">
+  <button class="tab active" data-v="exec">◆ Yonetici Ozeti</button>
+  <button class="tab" data-v="tech">⚙ Teknik Detay</button>
+</div>
+<div id="v-exec" class="view">{exc}</div>
+<div id="v-tech" class="view" hidden>{tech}</div>
+<div class="sub" style="margin-top:24px">aybusec · egitim amacli · sentetik veri · github.com/Kapistona/aybusec</div>
+</div>
+<script>
+document.querySelectorAll('.tab').forEach(function(b){{
+  b.addEventListener('click', function(){{
+    document.querySelectorAll('.tab').forEach(function(x){{x.classList.toggle('active', x===b);}});
+    document.getElementById('v-exec').hidden = (b.dataset.v!=='exec');
+    document.getElementById('v-tech').hidden = (b.dataset.v!=='tech');
+  }});
+}});
+</script>
+</body></html>"""
 
 
 # ===========================================================================
@@ -1114,9 +1143,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Egitim amacli SIEM log dedektif araci")
     ap.add_argument("logfile", nargs="?", help="analiz edilecek log dosyasi")
     ap.add_argument("--json", metavar="DOSYA", help="bulgulari JSON olarak yaz")
-    ap.add_argument("--html", metavar="DOSYA", help="self-contained HTML dashboard uret (teknik)")
-    ap.add_argument("--exec", dest="execout", metavar="DOSYA",
-                    help="yonetici (CISO) risk ozeti dashboard'u uret")
+    ap.add_argument("--html", metavar="DOSYA",
+                    help="self-contained HTML dashboard uret (Yonetici + Teknik tek sayfa)")
     ap.add_argument("--only", help="sadece bu dedektorler (virgulle)")
     ap.add_argument("--exclude", help="bu dedektorleri atla (virgulle)")
     ap.add_argument("--list", action="store_true", help="dedektorleri listele ve cik")
@@ -1191,12 +1219,6 @@ def main(argv=None):
         with open(args.html, "w", encoding="utf-8") as fh:
             fh.write(render_html(events, bad, findings))
         print(f"{C.GRN}HTML dashboard yazildi:{C.RESET} {args.html}  "
-              f"{C.DIM}(tarayicida ac){C.RESET}")
-
-    if args.execout:
-        with open(args.execout, "w", encoding="utf-8") as fh:
-            fh.write(render_exec_html(events, findings))
-        print(f"{C.GRN}Yonetici ozeti yazildi:{C.RESET} {args.execout}  "
               f"{C.DIM}(tarayicida ac){C.RESET}")
 
     # cikis kodu: kritik/high bulgu varsa 1 (CI/otomasyon icin)
