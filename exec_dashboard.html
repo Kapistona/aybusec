@@ -1,0 +1,100 @@
+<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aybusec — Yonetici Risk Ozeti</title><style>
+:root{
+  --plane:#0d0d0d; --surface:#1a1a19; --surface2:#222221;
+  --ink:#f0efec; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --ring:rgba(255,255,255,0.10);
+  --crit:#d03b3b; --high:#ec835a; --med:#fab219; --low:#0ca30c; --info:#898781;
+  --bar:#3987e5; --bar2:#d95926;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.5}
+.wrap{max-width:1100px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:22px;margin:0 0 2px} h2{font-size:15px;margin:0 0 14px;color:var(--ink2);
+  font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+.card{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:18px 20px;margin-bottom:18px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.kpi{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:16px 18px}
+.kpi .n{font-size:34px;font-weight:700;letter-spacing:-.02em}
+.kpi .l{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;margin-top:2px}
+.kpi.crit .n{color:var(--crit)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.stack{display:flex;height:26px;border-radius:6px;overflow:hidden;gap:2px;margin:6px 0 14px}
+.stack > span{display:block}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:13px;color:var(--ink2)}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.bars{display:flex;flex-direction:column;gap:9px}
+.bar{display:grid;grid-template-columns:150px 1fr 44px;align-items:center;gap:10px;font-size:13px}
+.bar .lab{color:var(--ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.track{background:var(--surface2);border-radius:4px;height:16px;overflow:hidden}
+.fill{height:100%;border-radius:4px}
+.bar .val{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{background:var(--surface2);border:1px solid var(--ring);border-radius:999px;
+  padding:4px 11px;font-size:12px;color:var(--ink2);font-variant-numeric:tabular-nums}
+.tl{position:relative;margin-left:8px;padding-left:22px;border-left:2px solid var(--grid)}
+.tl .ev{position:relative;padding:4px 0 14px}
+.tl .ev:before{content:"";position:absolute;left:-28px;top:7px;width:11px;height:11px;border-radius:50%;
+  border:2px solid var(--surface)}
+.tl .ev .t{color:var(--muted);font-size:12px;font-variant-numeric:tabular-nums}
+.tl .ev .d{font-size:14px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;color:var(--muted);font-weight:600;font-size:11px;text-transform:uppercase;
+  letter-spacing:.05em;padding:8px 10px;border-bottom:1px solid var(--grid)}
+td{padding:9px 10px;border-bottom:1px solid var(--grid);vertical-align:top}
+.badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.03em;color:#111}
+.b-crit{background:var(--crit);color:#fff} .b-high{background:var(--high)}
+.b-med{background:var(--med)} .b-low{background:var(--low);color:#fff} .b-info{background:var(--info)}
+.ent{color:var(--muted);font-size:12px}
+details summary{cursor:pointer;color:var(--bar);font-size:12px}
+details pre{background:var(--plane);border:1px solid var(--ring);border-radius:8px;padding:10px;
+  overflow:auto;font-size:11.5px;color:var(--ink2);margin:8px 0 0;white-space:pre-wrap;word-break:break-all}
+@media(max-width:720px){.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}
+  .bar{grid-template-columns:110px 1fr 40px}}
+
+.verdict{background:linear-gradient(90deg,rgba(208,59,59,.18),transparent);
+  border:1px solid var(--crit);border-left:4px solid var(--crit);border-radius:12px;padding:18px 20px;margin-bottom:18px}
+.verdict .v{font-size:19px;font-weight:700;color:var(--crit)} .verdict .vsub{color:var(--ink2);margin-top:4px}
+.chain{font-size:14px;color:var(--ink);margin-top:10px;line-height:1.7}
+.chain b{color:var(--high)}
+.heat{display:flex;flex-direction:column;gap:2px}
+.heat-row{display:grid;grid-template-columns:230px 90px 1fr 70px;align-items:center;gap:12px;
+  padding:11px 6px;border-bottom:1px solid var(--grid)}
+.heat-row .dn{font-weight:600}
+.heat-row .st{color:var(--ink2);font-size:13px}
+.heat-row .ct{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-size:13px}
+.prio-row{display:grid;grid-template-columns:48px 1fr;gap:14px;padding:16px 0;border-bottom:1px solid var(--grid)}
+.ptag{font-size:18px;font-weight:800;text-align:center;padding:6px 0;border-radius:8px;height:fit-content}
+.p-P1{background:var(--crit);color:#fff} .p-P2{background:var(--med);color:#111} .p-P3{background:var(--low);color:#fff}
+.prio-row .pn{font-weight:700;font-size:16px;margin-bottom:4px}
+.prio-row .pr{color:var(--ink2);font-size:14px;line-height:1.55}
+.prio-row .ps{color:var(--low);font-size:13px;margin-top:6px}
+.prio-row .ps b{color:var(--ink2);font-weight:600}
+</style></head>
+<body><div class="wrap">
+<h1>Guvenlik Durumu — Yonetici Ozeti</h1>
+<div class="sub">20283 olaylik telemetriden turetilmis risk degerlendirmesi · aybusec</div>
+
+<div class="verdict">
+  <div class="v">◆ GENEL DURUM: KRITIK — Aktif ihlal tespit edildi</div>
+  <div class="vsub">Birden fazla kontrol alaninda dogrulanmis ele gecirme ve veri sizintisi mevcut. Acil yatirim gerekiyor.</div>
+  <div class="chain">Phishing makrosu / brute-force ile <b>ilk erisim</b> &rarr; <b>ayricalik yukseltme</b> (4672 / LSASS) &rarr; <b>kimlik hirsizligi</b> &rarr; <b>~2.4 GB veri sizintisi</b> &amp; C2 kanali.</div>
+</div>
+
+<div class="kpis">
+  <div class="kpi crit"><div class="n">6</div><div class="l">Dogrulanmis Ihlal</div></div>
+  <div class="kpi crit"><div class="n">2.4<span style="font-size:18px"> GB</span></div><div class="l">Veri Sizintisi</div></div>
+  <div class="kpi"><div class="n">7</div><div class="l">Etkilenen Varlik</div></div>
+  <div class="kpi crit"><div class="n">3</div><div class="l">Kritik Alan</div></div>
+</div>
+
+<div class="card"><h2>Kontrol Alani Risk Haritasi</h2><div class="heat"><div class="heat-row"><span class="dn">Uc Nokta Guvenligi (EDR/EPP)</span><span class="badge b-crit">KRITIK</span><span class="st">12 bulgu · en yuksek: critical</span><span class="ct">skor 66</span></div><div class="heat-row"><span class="dn">Kimlik &amp; Erisim Yonetimi</span><span class="badge b-crit">KRITIK</span><span class="st">4 bulgu · en yuksek: critical</span><span class="ct">skor 35</span></div><div class="heat-row"><span class="dn">Uygulama Guvenligi (WAF/AppSec)</span><span class="badge b-crit">KRITIK</span><span class="st">9 bulgu · en yuksek: high</span><span class="ct">skor 27</span></div><div class="heat-row"><span class="dn">Veri Koruma &amp; Sizinti Onleme (DLP)</span><span class="badge b-high">YUKSEK</span><span class="st">1 bulgu · en yuksek: critical</span><span class="ct">skor 10</span></div><div class="heat-row"><span class="dn">Ag &amp; Cevre Guvenligi (NDR)</span><span class="badge b-med">ORTA</span><span class="st">2 bulgu · en yuksek: high</span><span class="ct">skor 7</span></div><div class="heat-row"><span class="dn">E-posta &amp; Kullanici Farkindaligi</span><span class="badge b-med">ORTA</span><span class="st">1 bulgu · en yuksek: high</span><span class="ct">skor 5</span></div></div></div>
+
+<div class="card"><h2>Yatirim Oncelikleri</h2><div class="prio-row"><div class="ptag p-P1">P1</div><div><div class="pn">Uc Nokta Guvenligi (EDR/EPP) <span class="badge b-crit" style="font-size:10px;vertical-align:2px">KRITIK</span></div><div class="pr">EDR'yi tespit -> ONLEME (block) moduna al; uygulama allow-list (imzasiz exe &amp; LOLBin engeli); PowerShell Constrained Language + script-block logging + AMSI; kalicilik (schtasks/Run key) izleme.</div><div class="ps"><b>Neyi durdururdu:</b> Encoded PowerShell, certutil/bitsadmin indirmeleri, imzasiz dropper ve persistence'i calismadan durdururdu.</div></div></div><div class="prio-row"><div class="ptag p-P1">P1</div><div><div class="pn">Kimlik &amp; Erisim Yonetimi <span class="badge b-crit" style="font-size:10px;vertical-align:2px">KRITIK</span></div><div class="pr">Uzaktan erisim ve TUM ayricalikli hesaplarda MFA zorunlu; SSH'ta parola login kapat (yalniz anahtar); PAM + Windows Credential Guard / LAPS; kosullu &amp; cografi erisim politikasi.</div><div class="ps"><b>Neyi durdururdu:</b> Brute-force ile hesap ele gecirme, ayricalik yukseltme, impossible-travel ve LSASS kimlik hirsizligini kokten keserdi.</div></div></div><div class="prio-row"><div class="ptag p-P1">P1</div><div><div class="pn">Uygulama Guvenligi (WAF/AppSec) <span class="badge b-crit" style="font-size:10px;vertical-align:2px">KRITIK</span></div><div class="pr">WAF devreye al; parametrik sorgu / girdi dogrulama (SQLi/XSS); web sunucu hardening &amp; webshell tespiti; guvenli SDLC + DAST.</div><div class="ps"><b>Neyi durdururdu:</b> SQLi/XSS/LFI, otomatik tarama ve webshell'i uygulama katmaninda durdururdu.</div></div></div><div class="prio-row"><div class="ptag p-P1">P1</div><div><div class="pn">Veri Koruma &amp; Sizinti Onleme (DLP) <span class="badge b-high" style="font-size:10px;vertical-align:2px">YUKSEK</span></div><div class="pr">Egress filtreleme + DLP; bilinmeyen dis hedeflere buyuk/anormal outbound'u engelle-alarmla; veri siniflandirma.</div><div class="ps"><b>Neyi durdururdu:</b> Disariya giden buyuk veri transferini kesip erken alarm verirdi.</div></div></div><div class="prio-row"><div class="ptag p-P2">P2</div><div><div class="pn">Ag &amp; Cevre Guvenligi (NDR) <span class="badge b-med" style="font-size:10px;vertical-align:2px">ORTA</span></div><div class="pr">DNS guvenligi (tunel/TXT anomali tespiti, protective DNS); cevre maruziyet azaltma; NDR ile dogu-bati gorunurluk.</div><div class="ps"><b>Neyi durdururdu:</b> DNS tunel C2 kanalini ve dis port taramasini erken yakalardi.</div></div></div><div class="prio-row"><div class="ptag p-P2">P2</div><div><div class="pn">E-posta &amp; Kullanici Farkindaligi <span class="badge b-med" style="font-size:10px;vertical-align:2px">ORTA</span></div><div class="pr">Office makro engelleme (imzasiz makro calismasin); e-posta eki sandbox/detonation; duzenli phishing simulasyonu + farkindalik egitimi.</div><div class="ps"><b>Neyi durdururdu:</b> Makro ile baslayan ilk bulasmayi (initial access) engellerdi.</div></div></div></div>
+
+<div class="sub" style="margin-top:20px">P1 = acil (bu ceyrek) · P2 = planli (6 ay) · P3 = iyilestirme · aybusec · sentetik veri</div>
+</div></body></html>

@@ -66,6 +66,17 @@ birebir. Üret, tarayıcıda aç:
 python3 analyze.py siem_sample.log --html dashboard.html && open dashboard.html
 ```
 
+### Yönetici (CISO) risk özeti
+
+`--exec` teknik gürültüyü soyutlar: bulguları **kontrol alanlarına** (Kimlik, Uç Nokta,
+Veri, Ağ, Uygulama, E-posta) eşler, her alana risk notu verir ve **yatırım önceliği
+(P1/P2/P3)** + "neyi durdururdu" önerisi çıkarır. Doğrulanmış ihlal sayısı, veri sızıntısı
+hacmi ve saldırı zinciri özeti üst banttadır.
+
+```bash
+python3 analyze.py siem_sample.log --exec exec_dashboard.html && open exec_dashboard.html
+```
+
 ### VirusTotal zenginleştirme (tek tıkla IOC sorgusu)
 
 Bulgulardaki IP'ler ve EDR hash'leri otomatik VirusTotal'de sorgulanır (saf `urllib`,

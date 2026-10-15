@@ -897,6 +897,175 @@ def render_html(events, bad, findings):
 
 
 # ===========================================================================
+# YONETICI (CISO) DASHBOARD  —  bulgulari kontrol alani + yatirim onceligine cevirir
+# ===========================================================================
+DOMAINS = {
+    "iam": {
+        "name": "Kimlik &amp; Erisim Yonetimi",
+        "rec": "Uzaktan erisim ve TUM ayricalikli hesaplarda MFA zorunlu; SSH'ta parola login kapat (yalniz anahtar); "
+               "PAM + Windows Credential Guard / LAPS; kosullu &amp; cografi erisim politikasi.",
+        "stops": "Brute-force ile hesap ele gecirme, ayricalik yukseltme, impossible-travel ve LSASS kimlik hirsizligini kokten keserdi.",
+    },
+    "endpoint": {
+        "name": "Uc Nokta Guvenligi (EDR/EPP)",
+        "rec": "EDR'yi tespit -> ONLEME (block) moduna al; uygulama allow-list (imzasiz exe &amp; LOLBin engeli); "
+               "PowerShell Constrained Language + script-block logging + AMSI; kalicilik (schtasks/Run key) izleme.",
+        "stops": "Encoded PowerShell, certutil/bitsadmin indirmeleri, imzasiz dropper ve persistence'i calismadan durdururdu.",
+    },
+    "data": {
+        "name": "Veri Koruma &amp; Sizinti Onleme (DLP)",
+        "rec": "Egress filtreleme + DLP; bilinmeyen dis hedeflere buyuk/anormal outbound'u engelle-alarmla; veri siniflandirma.",
+        "stops": "Disariya giden buyuk veri transferini kesip erken alarm verirdi.",
+    },
+    "network": {
+        "name": "Ag &amp; Cevre Guvenligi (NDR)",
+        "rec": "DNS guvenligi (tunel/TXT anomali tespiti, protective DNS); cevre maruziyet azaltma; NDR ile dogu-bati gorunurluk.",
+        "stops": "DNS tunel C2 kanalini ve dis port taramasini erken yakalardi.",
+    },
+    "appsec": {
+        "name": "Uygulama Guvenligi (WAF/AppSec)",
+        "rec": "WAF devreye al; parametrik sorgu / girdi dogrulama (SQLi/XSS); web sunucu hardening &amp; webshell tespiti; guvenli SDLC + DAST.",
+        "stops": "SQLi/XSS/LFI, otomatik tarama ve webshell'i uygulama katmaninda durdururdu.",
+    },
+    "email": {
+        "name": "E-posta &amp; Kullanici Farkindaligi",
+        "rec": "Office makro engelleme (imzasiz makro calismasin); e-posta eki sandbox/detonation; duzenli phishing simulasyonu + farkindalik egitimi.",
+        "stops": "Makro ile baslayan ilk bulasmayi (initial access) engellerdi.",
+    },
+}
+
+def classify_domain(f):
+    d = f.detector
+    if d in ("ssh_bruteforce", "win_bruteforce", "impossible_travel"):
+        return "iam"
+    if d in ("port_scan", "dns_tunnel"):
+        return "network"
+    if d in ("web_attack", "scanner_ua"):
+        return "appsec"
+    if d == "data_exfil":
+        return "data"
+    if d == "suspicious_process":
+        return "endpoint"
+    if d == "edr_endpoint":
+        if f.mitre.startswith("T1566"):
+            return "email"
+        if f.mitre.startswith("T1505"):
+            return "appsec"
+        if f.mitre.startswith("T1003"):
+            return "iam"
+        return "endpoint"
+    return "endpoint"
+
+SEV_WEIGHT = {"critical": 10, "high": 5, "medium": 2, "low": 1, "info": 0}
+COMPROMISE_RE = re.compile(r"compromise|BASARILI|exfil|LSASS|Reverse shell|Python reverse|cred dump", re.I)
+
+def _rating(score):
+    if score >= 15: return ("KRITIK", "crit", "P1")
+    if score >= 8:  return ("YUKSEK", "high", "P1")
+    if score >= 3:  return ("ORTA", "med", "P2")
+    if score > 0:   return ("DUSUK", "low", "P3")
+    return ("TEMIZ", "info", "-")
+
+EXEC_CSS = """
+.verdict{background:linear-gradient(90deg,rgba(208,59,59,.18),transparent);
+  border:1px solid var(--crit);border-left:4px solid var(--crit);border-radius:12px;padding:18px 20px;margin-bottom:18px}
+.verdict .v{font-size:19px;font-weight:700;color:var(--crit)} .verdict .vsub{color:var(--ink2);margin-top:4px}
+.chain{font-size:14px;color:var(--ink);margin-top:10px;line-height:1.7}
+.chain b{color:var(--high)}
+.heat{display:flex;flex-direction:column;gap:2px}
+.heat-row{display:grid;grid-template-columns:230px 90px 1fr 70px;align-items:center;gap:12px;
+  padding:11px 6px;border-bottom:1px solid var(--grid)}
+.heat-row .dn{font-weight:600}
+.heat-row .st{color:var(--ink2);font-size:13px}
+.heat-row .ct{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;font-size:13px}
+.prio-row{display:grid;grid-template-columns:48px 1fr;gap:14px;padding:16px 0;border-bottom:1px solid var(--grid)}
+.ptag{font-size:18px;font-weight:800;text-align:center;padding:6px 0;border-radius:8px;height:fit-content}
+.p-P1{background:var(--crit);color:#fff} .p-P2{background:var(--med);color:#111} .p-P3{background:var(--low);color:#fff}
+.prio-row .pn{font-weight:700;font-size:16px;margin-bottom:4px}
+.prio-row .pr{color:var(--ink2);font-size:14px;line-height:1.55}
+.prio-row .ps{color:var(--low);font-size:13px;margin-top:6px}
+.prio-row .ps b{color:var(--ink2);font-weight:600}
+"""
+
+def render_exec_html(events, findings):
+    # alan bazli topla
+    agg = {k: {"findings": [], "score": 0} for k in DOMAINS}
+    for f in findings:
+        dk = classify_domain(f)
+        agg[dk]["findings"].append(f)
+        agg[dk]["score"] += SEV_WEIGHT.get(f.severity, 0)
+
+    ranked = sorted(DOMAINS, key=lambda k: -agg[k]["score"])
+
+    # headline rakamlar
+    confirmed = [f for f in findings if COMPROMISE_RE.search(f.title)]
+    exfil_mb = sum(f.entities.get("total_mb", 0) for f in findings if f.detector == "data_exfil")
+    hosts = {f.entities.get("host") for f in findings if f.entities.get("host")}
+    crit_domains = sum(1 for k in DOMAINS if _rating(agg[k]["score"])[0] == "KRITIK")
+
+    # heatmap satirlari
+    heat = []
+    for k in ranked:
+        rating, col, _ = _rating(agg[k]["score"])
+        fs = agg[k]["findings"]
+        n = len(fs)
+        worst = max((f.severity for f in fs), key=lambda s: SEV_RANK[s]) if fs else "-"
+        st = (f"{n} bulgu · en yuksek: {worst}" if fs else "bu veride bulgu yok")
+        heat.append(
+            f'<div class="heat-row"><span class="dn">{DOMAINS[k]["name"]}</span>'
+            f'<span class="badge b-{col}">{rating}</span>'
+            f'<span class="st">{st}</span>'
+            f'<span class="ct">skor {agg[k]["score"]}</span></div>')
+
+    # yatirim oncelikleri (skoru > 0 olan alanlar, siralali)
+    prio = []
+    for k in ranked:
+        if agg[k]["score"] == 0:
+            continue
+        rating, col, p = _rating(agg[k]["score"])
+        d = DOMAINS[k]
+        prio.append(
+            f'<div class="prio-row"><div class="ptag p-{p}">{p}</div><div>'
+            f'<div class="pn">{d["name"]} <span class="badge b-{col}" '
+            f'style="font-size:10px;vertical-align:2px">{rating}</span></div>'
+            f'<div class="pr">{d["rec"]}</div>'
+            f'<div class="ps"><b>Neyi durdururdu:</b> {d["stops"]}</div></div></div>')
+
+    gb = exfil_mb / 1000
+    chain = ('Phishing makrosu / brute-force ile <b>ilk erisim</b> &rarr; '
+             '<b>ayricalik yukseltme</b> (4672 / LSASS) &rarr; '
+             '<b>kimlik hirsizligi</b> &rarr; '
+             f'<b>~{gb:.1f} GB veri sizintisi</b> &amp; C2 kanali.')
+
+    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>aybusec — Yonetici Risk Ozeti</title><style>{HTML_CSS}{EXEC_CSS}</style></head>
+<body><div class="wrap">
+<h1>Guvenlik Durumu — Yonetici Ozeti</h1>
+<div class="sub">{len(events)} olaylik telemetriden turetilmis risk degerlendirmesi · aybusec</div>
+
+<div class="verdict">
+  <div class="v">◆ GENEL DURUM: KRITIK — Aktif ihlal tespit edildi</div>
+  <div class="vsub">Birden fazla kontrol alaninda dogrulanmis ele gecirme ve veri sizintisi mevcut. Acil yatirim gerekiyor.</div>
+  <div class="chain">{chain}</div>
+</div>
+
+<div class="kpis">
+  <div class="kpi crit"><div class="n">{len(confirmed)}</div><div class="l">Dogrulanmis Ihlal</div></div>
+  <div class="kpi crit"><div class="n">{gb:.1f}<span style="font-size:18px"> GB</span></div><div class="l">Veri Sizintisi</div></div>
+  <div class="kpi"><div class="n">{len(hosts)}</div><div class="l">Etkilenen Varlik</div></div>
+  <div class="kpi crit"><div class="n">{crit_domains}</div><div class="l">Kritik Alan</div></div>
+</div>
+
+<div class="card"><h2>Kontrol Alani Risk Haritasi</h2><div class="heat">{"".join(heat)}</div></div>
+
+<div class="card"><h2>Yatirim Oncelikleri</h2>{"".join(prio)}</div>
+
+<div class="sub" style="margin-top:20px">P1 = acil (bu ceyrek) · P2 = planli (6 ay) · P3 = iyilestirme · aybusec · sentetik veri</div>
+</div></body></html>"""
+
+
+# ===========================================================================
 # RAPORLAMA
 # ===========================================================================
 def print_report(events, bad, findings):
@@ -945,7 +1114,9 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Egitim amacli SIEM log dedektif araci")
     ap.add_argument("logfile", nargs="?", help="analiz edilecek log dosyasi")
     ap.add_argument("--json", metavar="DOSYA", help="bulgulari JSON olarak yaz")
-    ap.add_argument("--html", metavar="DOSYA", help="self-contained HTML dashboard uret")
+    ap.add_argument("--html", metavar="DOSYA", help="self-contained HTML dashboard uret (teknik)")
+    ap.add_argument("--exec", dest="execout", metavar="DOSYA",
+                    help="yonetici (CISO) risk ozeti dashboard'u uret")
     ap.add_argument("--only", help="sadece bu dedektorler (virgulle)")
     ap.add_argument("--exclude", help="bu dedektorleri atla (virgulle)")
     ap.add_argument("--list", action="store_true", help="dedektorleri listele ve cik")
@@ -1020,6 +1191,12 @@ def main(argv=None):
         with open(args.html, "w", encoding="utf-8") as fh:
             fh.write(render_html(events, bad, findings))
         print(f"{C.GRN}HTML dashboard yazildi:{C.RESET} {args.html}  "
+              f"{C.DIM}(tarayicida ac){C.RESET}")
+
+    if args.execout:
+        with open(args.execout, "w", encoding="utf-8") as fh:
+            fh.write(render_exec_html(events, findings))
+        print(f"{C.GRN}Yonetici ozeti yazildi:{C.RESET} {args.execout}  "
               f"{C.DIM}(tarayicida ac){C.RESET}")
 
     # cikis kodu: kritik/high bulgu varsa 1 (CI/otomasyon icin)
