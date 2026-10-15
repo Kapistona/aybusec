@@ -122,3 +122,12 @@ python3 analyze.py --vt --ip 8.8.8.8 --hash <sha256>   # log olmadan tek atış 
 - `siem_sample.log` — sentetik örnek SIEM log'u (~20K satır)
 - `gen_log.py` — örnek log'u üreten script (senaryoları/oranları değiştirmek için)
 - `dashboard.html` — örnek çıktı dashboard'u (araç `--html` ile yeniden üretir)
+- `reversing/` — tersine mühendislik lab'ı (çok aşamalı crackme zinciri + statik triyaj pipeline)
+
+## Reversing lab
+
+SIEM/EDR senaryosunun devamı: EDR'nin yakaladığı dropper'ın **zararsız numunesini**
+tersine mühendislikle çöz. Çok aşamalı zincir (encoded PowerShell → XOR parola →
+anti-debug + flag). Linux (ELF) ve Windows (PE) binary'leri hazır. Ayrıca harici araç
+gerektirmeyen bir **statik triyaj pipeline**'ı (`rev_pipeline.py`) analiz sonunda biri
+teknik biri yönetimsel iki sade rapor üretir. Ayrıntı: [`reversing/README.md`](reversing/README.md).
