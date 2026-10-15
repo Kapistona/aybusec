@@ -77,8 +77,17 @@ Dashboard **tek sayfada iki görünüm** barındırır, üstteki menüden geçil
 
 **İnteraktif:** bulgu tablosundaki bir satıra veya timeline'daki bir olaya tıklayınca
 yan panel (drawer) açılır — detay, kanıt satırları, **müdahale playbook'u** (adım adım)
-ve **kopyalanabilir Sigma-vari tespit kuralı**. Severity rozetleri ve arama kutusuyla
-canlı filtreleme. Hepsi offline, tek HTML.
+ve **kopyalanabilir tespit kuralları: Sigma + YARA** (özellikle EDR bulguları için
+hazır YARA imzası). Severity rozetleri ve arama kutusuyla canlı filtreleme. Hepsi
+offline, tek HTML.
+
+**YARA üretimi:** `--yara aybusec.yar` ile bulgulara uygun tüm YARA kuralları tek
+dosyaya yazılır (yara 4.x ile derlenir; ileride CrowdStrike IOA/IOC API'ye beslenip
+otomatik enable edilebilir).
+
+```bash
+python3 analyze.py siem_sample.log --yara aybusec.yar
+```
 
 Tek URL, tek dosya — bir kuruma dağıtmak için birebir.
 

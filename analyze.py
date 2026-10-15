@@ -1051,6 +1051,72 @@ PLAYBOOKS = {
 _DEFAULT_PB = {"steps": ["Olayi dogrula, kapsa (containment), kok neden analizi yap."],
                "rule": "title: Genel bulgu\nlevel: info"}
 
+# --- YARA kural ureteci: dedektor -> kopyala-yapistir hazir YARA kurali ---
+# (dosya/bellek/komut-satiri eslesmesi; log-only dedektorlerde None -> Sigma kullan)
+YARA_RULES = {
+    "edr_endpoint": '''rule aybusec_edr_powershell_dropper_chain
+{
+    meta:
+        author      = "aybusec"
+        description = "Encoded PowerShell dropper + LOLBin indirme + LSASS cred-dump zinciri"
+        mitre       = "T1059.001, T1027, T1105, T1218, T1003.001"
+        severity    = "high"
+        reference   = "github.com/Kapistona/aybusec"
+    strings:
+        $ps_enc    = "-enc"          ascii wide nocase
+        $ps_hidden = "-w hidden"     ascii wide nocase
+        $ps_iex    = "IEX"           ascii wide
+        $ps_dl     = "DownloadString" ascii wide nocase
+        $amsi      = "AmsiUtils"     ascii wide nocase
+        $lsass1    = "comsvcs.dll"   ascii wide nocase
+        $lsass2    = "MiniDump"      ascii wide nocase
+        $mimi      = "sekurlsa::logonpasswords" ascii wide nocase
+        $lol_ct    = "certutil"      ascii wide nocase
+        $lol_uc    = "-urlcache"     ascii wide nocase
+        $lol_bits  = "bitsadmin /transfer" ascii wide nocase
+    condition:
+        2 of them
+}''',
+    "suspicious_process": '''rule aybusec_reverse_shell_dropper
+{
+    meta:
+        author      = "aybusec"
+        description = "Linux reverse shell / dropper komut imzalari"
+        mitre       = "T1059"
+        severity    = "critical"
+    strings:
+        $devtcp = "/dev/tcp/" ascii
+        $nc_e   = "nc -e"     ascii
+        $bash_i = "bash -i"   ascii
+        $pty    = "pty.spawn" ascii
+        $shadow = "/etc/shadow" ascii
+        $wget_ip = /wget\\s+https?:\\/\\/\\d{1,3}(\\.\\d{1,3}){3}/ ascii
+    condition:
+        any of them
+}''',
+    "web_attack": '''rule aybusec_webshell_indicators
+{
+    meta:
+        author      = "aybusec"
+        description = "Webshell / komut enjeksiyonu govde imzalari"
+        mitre       = "T1505.003, T1059"
+        severity    = "high"
+    strings:
+        $c1 = "cmd.exe /c"  ascii nocase
+        $c2 = "/bin/sh"     ascii
+        $p1 = "eval("       ascii nocase
+        $p2 = "system("     ascii nocase
+        $p3 = "passthru("   ascii nocase
+        $p4 = "shell_exec(" ascii nocase
+        $w  = "whoami"      ascii nocase
+    condition:
+        2 of them
+}''',
+}
+
+def yara_for(detector):
+    return YARA_RULES.get(detector)
+
 INT_CSS = """
 .filter{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
 .filter .fc{background:var(--surface2);border:1px solid var(--ring);color:var(--ink2);
@@ -1174,6 +1240,7 @@ def render_html(events, bad, findings):
             "count": f.count,
             "time": f.first_seen.strftime("%Y-%m-%d %H:%M") if f.first_seen else "",
             "ent": f.entities, "ev": f.evidence, "steps": pb["steps"], "rule": pb["rule"],
+            "yara": yara_for(f.detector) or "",
         }
     data_json = json.dumps(data, ensure_ascii=False)
 
@@ -1209,7 +1276,9 @@ def render_html(events, bad, findings):
   <h4>Kanit</h4><pre id="dwev"></pre>
   <h4>Playbook — mudahale adimlari</h4><ol id="dwpb"></ol>
   <h4>Tespit kurali (Sigma-vari)</h4><pre id="dwrule"></pre>
-  <button class="dw-copy" onclick="copyRule(this)">Kurali kopyala</button>
+  <button class="dw-copy" onclick="copyText(this,'rule')">Sigma kopyala</button>
+  <div id="dwyarawrap"><h4>YARA kurali</h4><pre id="dwyara"></pre>
+    <button class="dw-copy" onclick="copyText(this,'yara')">YARA kopyala</button></div>
 </div>"""
 
     js = """
@@ -1217,7 +1286,7 @@ def render_html(events, bad, findings):
 const DATA = __DATA__;
 const SEVB = {critical:'b-crit',high:'b-high',medium:'b-med',low:'b-low',info:'b-info'};
 function esc(s){return String(s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
-let curRule='';
+let cur={rule:'',yara:''};
 function openDrawer(id){
   const f=DATA[id]; if(!f) return;
   const sv=document.getElementById('dwsev'); sv.className='badge '+SEVB[f.sev]; sv.textContent=f.sev;
@@ -1226,11 +1295,13 @@ function openDrawer(id){
   document.getElementById('dwent').innerHTML=Object.keys(f.ent).map(function(k){return '<div><b>'+esc(k)+'</b>: '+esc(f.ent[k])+'</div>';}).join('');
   document.getElementById('dwev').textContent=(f.ev||[]).join('\\n')||'(kanit yok)';
   document.getElementById('dwpb').innerHTML=(f.steps||[]).map(function(s){return '<li>'+esc(s)+'</li>';}).join('');
-  curRule=f.rule||''; document.getElementById('dwrule').textContent=curRule;
+  cur.rule=f.rule||''; document.getElementById('dwrule').textContent=cur.rule;
+  cur.yara=f.yara||''; document.getElementById('dwyara').textContent=cur.yara;
+  document.getElementById('dwyarawrap').style.display = cur.yara ? '' : 'none';
   document.getElementById('drawer').hidden=false; document.getElementById('scrim').hidden=false;
 }
 function closeDrawer(){document.getElementById('drawer').hidden=true;document.getElementById('scrim').hidden=true;}
-function copyRule(btn){ if(navigator.clipboard) navigator.clipboard.writeText(curRule);
+function copyText(btn,which){ var v=cur[which]||''; if(navigator.clipboard) navigator.clipboard.writeText(v);
   const t=btn.textContent; btn.textContent='Kopyalandi \\u2713'; setTimeout(function(){btn.textContent=t;},1200);}
 document.addEventListener('click',function(e){var el=e.target.closest('.clk'); if(el && el.dataset.fid!=='') openDrawer(el.dataset.fid);});
 document.addEventListener('keydown',function(e){if(e.key==='Escape') closeDrawer();});
@@ -1310,6 +1381,8 @@ def main(argv=None):
     ap.add_argument("--json", metavar="DOSYA", help="bulgulari JSON olarak yaz")
     ap.add_argument("--html", metavar="DOSYA",
                     help="self-contained HTML dashboard uret (Yonetici + Teknik tek sayfa)")
+    ap.add_argument("--yara", metavar="DOSYA",
+                    help="bulgulara uygun YARA kurallarini .yar dosyasina yaz")
     ap.add_argument("--only", help="sadece bu dedektorler (virgulle)")
     ap.add_argument("--exclude", help="bu dedektorleri atla (virgulle)")
     ap.add_argument("--list", action="store_true", help="dedektorleri listele ve cik")
@@ -1385,6 +1458,20 @@ def main(argv=None):
             fh.write(render_html(events, bad, findings))
         print(f"{C.GRN}HTML dashboard yazildi:{C.RESET} {args.html}  "
               f"{C.DIM}(tarayicida ac){C.RESET}")
+
+    if args.yara:
+        dets = []
+        for f in findings:
+            if yara_for(f.detector) and f.detector not in dets:
+                dets.append(f.detector)
+        rules = [YARA_RULES[d] for d in dets]
+        header = ("/* aybusec — otomatik uretilmis YARA kurallari\n"
+                  "   kaynak: analiz edilen bulgular · sentetik/egitim · "
+                  "ileride CrowdStrike IOA/IOC API'ye beslenebilir */\n\n")
+        with open(args.yara, "w", encoding="utf-8") as fh:
+            fh.write(header + "\n\n".join(rules) + "\n")
+        print(f"{C.GRN}YARA kurallari yazildi:{C.RESET} {args.yara}  "
+              f"{C.DIM}({len(rules)} kural){C.RESET}")
 
     # cikis kodu: kritik/high bulgu varsa 1 (CI/otomasyon icin)
     return 1 if any(f.severity in ("critical", "high") for f in findings) else 0
