@@ -838,7 +838,8 @@ def _tech_cards(events, bad, findings):
     for f in sorted(findings, key=lambda x: (x.first_seen or datetime.max.replace(tzinfo=None))):
         c = SEV_CSS[f.severity]
         t = f.first_seen.strftime("%m-%d %H:%M") if f.first_seen else "??"
-        tl.append(f'<div class="ev" style="--dot:var(--{c})">'
+        tl.append(f'<div class="ev clk" data-fid="{getattr(f,"fid","")}" data-sev="{f.severity}" '
+                  f'style="--dot:var(--{c})">'
                   f'<style>.tl .ev:nth-of-type({len(tl)+1}):before{{background:var(--{c})}}</style>'
                   f'<div class="t">{t}</div><div class="d">{_esc(f.title)}</div></div>')
     timeline = '<div class="tl">' + "".join(tl) + "</div>"
@@ -848,17 +849,24 @@ def _tech_cards(events, bad, findings):
     for f in sorted(findings, key=lambda x: (-SEV_RANK[x.severity],
                                              x.first_seen or datetime.max.replace(tzinfo=None))):
         ent = ", ".join(f"{k}={v}" for k, v in f.entities.items())
-        evid = "".join(f"<pre>{_esc(e)}</pre>" for e in f.evidence)
-        det = "" if not evid else f'<details><summary>kanit ({len(f.evidence)})</summary>{evid}</details>'
         rows.append(
-            f'<tr><td><span class="badge b-{SEV_CSS[f.severity]}">{f.severity}</span></td>'
+            f'<tr class="clk" data-fid="{getattr(f,"fid","")}" data-sev="{f.severity}">'
+            f'<td><span class="badge b-{SEV_CSS[f.severity]}">{f.severity}</span></td>'
             f'<td>{_esc(f.detector)}</td>'
-            f'<td>{_esc(f.title)}<div class="ent">{_esc(ent)}</div>{det}</td>'
+            f'<td>{_esc(f.title)}<div class="ent">{_esc(ent)}</div></td>'
             f'<td style="white-space:nowrap">{_esc(f.mitre.split(" - ")[0])}</td>'
             f'<td class="val" style="text-align:right">{f.count}</td></tr>')
-    table = ('<table><thead><tr><th>Severity</th><th>Dedektor</th><th>Bulgu</th>'
+    sev_chips = "".join(
+        f'<span class="fc" data-sev="{s}">{s}</span>'
+        for s in ("critical", "high", "medium", "low", "info") if any(x.severity == s for x in findings))
+    filterbar = (f'<div class="filter">{sev_chips}'
+                 f'<input id="fsearch" type="search" placeholder="ara (IP, host, dedektor)..."></div>')
+    hint = '<div class="ent" style="margin-top:8px">Bir satira tikla &rarr; detay + playbook + tespit kurali</div>'
+    table = (filterbar
+             + '<table id="ftable"><thead><tr><th>Severity</th><th>Dedektor</th><th>Bulgu</th>'
              '<th>MITRE</th><th>Olay</th></tr></thead><tbody>'
-             + "".join(rows) + "</tbody></table>")
+             + "".join(rows)
+             + "</tbody></table>" + hint)
 
     chips = "".join(f'<span class="chip">{_esc(m)}</span>' for m in mitre)
     crit = sevc.get("critical", 0)
@@ -979,6 +987,99 @@ EXEC_CSS = """
 .prio-row .ps b{color:var(--ink2);font-weight:600}
 """
 
+# --- her dedektor icin playbook (mudahale adimlari) + tespit kurali (Sigma-vari) ---
+PLAYBOOKS = {
+    "ssh_bruteforce": {"steps": [
+        "Kaynak IP'yi firewall'da engelle / rate-limit uygula.",
+        "Hedef hesabi gecici kilitle, parolayi sifirla.",
+        "Aktif SSH oturumlarini sonlandir (w / pkill -u).",
+        "Basarili giris sonrasi komut gecmisi ve sudo loglarini incele.",
+        "Parola login'i kapat; anahtar + MFA zorunlu kil."],
+        "rule": "title: SSH Brute-force ardindan Basarili Giris\nlogsource:\n  product: linux\n  service: sshd\ndetection:\n  fail: 'Failed password'\n  ok:   'Accepted password'\n  timeframe: 5m\n  condition: count(fail) > 15 and ok (ayni src_ip)\nlevel: critical"},
+    "win_bruteforce": {"steps": [
+        "Kaynak IP'yi engelle; etkilenen hesabi devre disi birak.",
+        "4624/4672 sonrasi olusan process'leri (4688) incele.",
+        "Kerberos/NTLM biletlerini iptal et, parola sifirla.",
+        "Yatay hareket icin diger DC/host'larda ayni hesabi ara.",
+        "Account lockout politikasi + MFA uygula."],
+        "rule": "title: Windows Brute-force -> Logon -> Privilege\nlogsource:\n  product: windows\n  service: security\ndetection:\n  f: EventID=4625\n  s: EventID=4624\n  p: EventID=4672\n  timeframe: 10m\n  condition: count(f) > 20 and s and p (ayni Source)\nlevel: critical"},
+    "impossible_travel": {"steps": [
+        "Hesabi derhal devre disi birak, tum oturum/token'lari iptal et.",
+        "Kullaniciyi ikinci kanaldan dogrula (telefon).",
+        "Her iki konumdan yapilan islemleri incele.",
+        "Kosullu erisim + MFA + imkansiz-seyahat alarmi kur."],
+        "rule": "title: Impossible Travel\ndetection:\n  condition: ayni kullanici, < 60 dk icinde farkli ulkeden basarili giris\nlevel: high"},
+    "port_scan": {"steps": [
+        "Tarayan IP'yi cevrede engelle.",
+        "Disa acik servisleri ve maruziyeti gozden gecir.",
+        "Taramanin ardindan exploit denemesi var mi diye logu izle."],
+        "rule": "title: Port Scan\nlogsource: {product: firewall}\ndetection:\n  condition: ayni SRC'den < 2 dk icinde > 40 farkli DPT (DROP)\nlevel: medium"},
+    "dns_tunnel": {"steps": [
+        "Supheli domaini DNS'te engelle (sinkhole).",
+        "Sorgu yapan istemciyi ag'dan izole et.",
+        "C2 / veri sizintisi icin host'u triyaj et.",
+        "Protective DNS + TXT/uzun-label anomali tespiti devreye al."],
+        "rule": "title: DNS Tunnel / C2\nlogsource: {service: dns}\ndetection:\n  condition: tek domaine > 20 TXT ya da en-sol etiket > 30 karakter\nlevel: high"},
+    "data_exfil": {"steps": [
+        "Hedef IP'ye giden trafigi engelle.",
+        "Kaynak host'u izole et (containment).",
+        "Sizan verinin kapsamini ve siniflandirmasini belirle.",
+        "Hukuk/IR ve gerekirse ihlal bildirim surecini baslat."],
+        "rule": "title: Buyuk Outbound (Exfil)\nlogsource: {product: firewall}\ndetection:\n  condition: tek dis hedefe tek akista > 10 MB outbound\nlevel: critical"},
+    "web_attack": {"steps": [
+        "WAF'ta ilgili imzayi/kaynagi engelle.",
+        "Hedef endpoint'i yamala (parametrik sorgu / girdi dogrulama).",
+        "Saldirinin basarili olup olmadigini (5xx/veri donusu) logdan dogrula."],
+        "rule": "title: Web Application Attack\nlogsource: {product: nginx}\ndetection:\n  sqli: 'union select|or 1=1|sleep('\n  xss:  '<script|onerror='\n  lfi:  '../|/etc/passwd'\n  condition: url matches (sqli or xss or lfi)\nlevel: high"},
+    "scanner_ua": {"steps": [
+        "Tarayici UA'li kaynagi engelle / rate-limit.",
+        "Disa acik yuzeyi azalt; bulunan dizin/dosyalari kaldir."],
+        "rule": "title: Otomatik Tarayici UA\ndetection:\n  condition: User-Agent matches 'sqlmap|nikto|nmap|nuclei|gobuster'\nlevel: medium"},
+    "suspicious_process": {"steps": [
+        "Host'u ag'dan izole et.",
+        "Supheli process'i sonlandir; bellek/triyaj topla.",
+        "Kalicilik ve yan bulasma ara; gerekirse host'u yeniden kur."],
+        "rule": "title: Supheli Process (reverse shell / dropper)\nlogsource: {service: auditd}\ndetection:\n  condition: komut '/dev/tcp|nc -e|/etc/shadow' iceriyor\nlevel: critical"},
+    "edr_endpoint": {"steps": [
+        "Uc noktayi derhal izole et (EDR containment).",
+        "Triyaj paketi topla (process agaci, autoruns, bellek).",
+        "LSASS/kimlik erisimi varsa ilgili hesaplarin parolasini sifirla.",
+        "Yatay hareket ve kalicilik (schtasks/Run) ara.",
+        "EDR'yi block moduna al; imzasiz exe & LOLBin'i engelle."],
+        "rule": "title: Supheli Endpoint Davranisi\nlogsource: {product: edr}\ndetection:\n  condition: PowerShell -enc / DownloadString / AMSI bypass / comsvcs MiniDump / Office->shell\nlevel: high"},
+}
+_DEFAULT_PB = {"steps": ["Olayi dogrula, kapsa (containment), kok neden analizi yap."],
+               "rule": "title: Genel bulgu\nlevel: info"}
+
+INT_CSS = """
+.filter{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px}
+.filter .fc{background:var(--surface2);border:1px solid var(--ring);color:var(--ink2);
+  padding:4px 11px;border-radius:999px;font-size:12px;cursor:pointer;user-select:none}
+.filter .fc.off{opacity:.35;text-decoration:line-through}
+.filter input{background:var(--surface2);border:1px solid var(--ring);color:var(--ink);
+  border-radius:8px;padding:6px 10px;font-size:13px;font-family:inherit;margin-left:auto;min-width:160px}
+tr.clk,.tl .ev.clk{cursor:pointer}
+tr.clk:hover{background:var(--surface2)}
+.tl .ev.clk:hover .d{color:var(--bar)}
+tr.hide{display:none}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:40}
+.drawer{position:fixed;top:0;right:0;width:min(460px,92vw);height:100vh;overflow:auto;z-index:50;
+  background:var(--surface);border-left:1px solid var(--ring);padding:22px;box-shadow:-8px 0 30px rgba(0,0,0,.4)}
+.drawer h3{font-size:17px;margin:6px 0 10px} .drawer h4{font-size:12px;text-transform:uppercase;
+  letter-spacing:.05em;color:var(--muted);margin:18px 0 8px}
+.dw-head{display:flex;justify-content:space-between;align-items:center}
+.dw-x{background:none;border:none;color:var(--ink2);font-size:26px;cursor:pointer;line-height:1}
+.drawer .meta{color:var(--ink2);font-size:13px} .drawer .meta b{color:var(--ink)}
+.drawer pre{background:var(--plane);border:1px solid var(--ring);border-radius:8px;padding:11px;
+  font-size:11.5px;color:var(--ink2);white-space:pre-wrap;word-break:break-all;overflow:auto}
+.drawer ol{margin:0;padding-left:20px} .drawer ol li{margin:6px 0;font-size:13.5px}
+.dw-copy{margin-top:8px;background:var(--bar);color:#fff;border:none;border-radius:8px;
+  padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+.dw-copy:active{transform:translateY(1px)}
+.ent-tbl{font-size:12.5px;color:var(--ink2)} .ent-tbl div{padding:2px 0;border-bottom:1px solid var(--grid)}
+.ent-tbl b{color:var(--ink);font-weight:600}
+"""
+
 NAV_CSS = """
 .nav{display:flex;gap:8px;margin:0 0 20px}
 .nav .tab{background:var(--surface);border:1px solid var(--ring);color:var(--ink2);
@@ -1062,15 +1163,29 @@ def _exec_cards(events, findings):
 
 
 def render_html(events, bad, findings):
-    """Tek sayfa birlesik dashboard: Yonetici Ozeti + Teknik Detay (menu ile gecis)."""
+    """Tek sayfa, interaktif birlesik dashboard: Yonetici + Teknik + tiklanabilir drawer."""
+    for i, f in enumerate(findings):
+        f.fid = i
+    data = {}
+    for f in findings:
+        pb = PLAYBOOKS.get(f.detector, _DEFAULT_PB)
+        data[str(f.fid)] = {
+            "title": f.title, "sev": f.severity, "det": f.detector, "mitre": f.mitre,
+            "count": f.count,
+            "time": f.first_seen.strftime("%Y-%m-%d %H:%M") if f.first_seen else "",
+            "ent": f.entities, "ev": f.evidence, "steps": pb["steps"], "rule": pb["rule"],
+        }
+    data_json = json.dumps(data, ensure_ascii=False)
+
     rng = (f"{events[0].ts:%Y-%m-%d %H:%M} — {events[-1].ts:%Y-%m-%d %H:%M}"
            if events else "-")
     exc = _exec_cards(events, findings)
     tech = _tech_cards(events, bad, findings)
-    return f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
+
+    head = f"""<!doctype html><html lang="tr"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>aybusec — Guvenlik Dashboard</title>
-<style>{HTML_CSS}{EXEC_CSS}{NAV_CSS}</style></head>
+<style>{HTML_CSS}{EXEC_CSS}{NAV_CSS}{INT_CSS}</style></head>
 <body><div class="wrap">
 <h1>aybusec — Guvenlik Dashboard</h1>
 <div class="sub">{len(events)} olay &nbsp;·&nbsp; {rng} &nbsp;·&nbsp; {len(findings)} bulgu</div>
@@ -1081,17 +1196,67 @@ def render_html(events, bad, findings):
 <div id="v-exec" class="view">{exc}</div>
 <div id="v-tech" class="view" hidden>{tech}</div>
 <div class="sub" style="margin-top:24px">aybusec · egitim amacli · sentetik veri · github.com/Kapistona/aybusec</div>
-</div>
+</div>"""
+
+    drawer = """
+<div id="scrim" class="scrim" hidden onclick="closeDrawer()"></div>
+<div id="drawer" class="drawer" hidden>
+  <div class="dw-head"><span id="dwsev" class="badge"></span>
+    <button class="dw-x" onclick="closeDrawer()">&times;</button></div>
+  <h3 id="dwtitle"></h3>
+  <div class="meta" id="dwmeta"></div>
+  <h4>Varliklar</h4><div class="ent-tbl" id="dwent"></div>
+  <h4>Kanit</h4><pre id="dwev"></pre>
+  <h4>Playbook — mudahale adimlari</h4><ol id="dwpb"></ol>
+  <h4>Tespit kurali (Sigma-vari)</h4><pre id="dwrule"></pre>
+  <button class="dw-copy" onclick="copyRule(this)">Kurali kopyala</button>
+</div>"""
+
+    js = """
 <script>
-document.querySelectorAll('.tab').forEach(function(b){{
-  b.addEventListener('click', function(){{
-    document.querySelectorAll('.tab').forEach(function(x){{x.classList.toggle('active', x===b);}});
-    document.getElementById('v-exec').hidden = (b.dataset.v!=='exec');
-    document.getElementById('v-tech').hidden = (b.dataset.v!=='tech');
-  }});
-}});
+const DATA = __DATA__;
+const SEVB = {critical:'b-crit',high:'b-high',medium:'b-med',low:'b-low',info:'b-info'};
+function esc(s){return String(s).replace(/[&<>]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+let curRule='';
+function openDrawer(id){
+  const f=DATA[id]; if(!f) return;
+  const sv=document.getElementById('dwsev'); sv.className='badge '+SEVB[f.sev]; sv.textContent=f.sev;
+  document.getElementById('dwtitle').textContent=f.title;
+  document.getElementById('dwmeta').innerHTML='<b>MITRE:</b> '+esc(f.mitre)+' &nbsp;·&nbsp; <b>Dedektor:</b> '+esc(f.det)+' &nbsp;·&nbsp; <b>Olay:</b> '+f.count+(f.time?' &nbsp;·&nbsp; '+esc(f.time):'');
+  document.getElementById('dwent').innerHTML=Object.keys(f.ent).map(function(k){return '<div><b>'+esc(k)+'</b>: '+esc(f.ent[k])+'</div>';}).join('');
+  document.getElementById('dwev').textContent=(f.ev||[]).join('\\n')||'(kanit yok)';
+  document.getElementById('dwpb').innerHTML=(f.steps||[]).map(function(s){return '<li>'+esc(s)+'</li>';}).join('');
+  curRule=f.rule||''; document.getElementById('dwrule').textContent=curRule;
+  document.getElementById('drawer').hidden=false; document.getElementById('scrim').hidden=false;
+}
+function closeDrawer(){document.getElementById('drawer').hidden=true;document.getElementById('scrim').hidden=true;}
+function copyRule(btn){ if(navigator.clipboard) navigator.clipboard.writeText(curRule);
+  const t=btn.textContent; btn.textContent='Kopyalandi \\u2713'; setTimeout(function(){btn.textContent=t;},1200);}
+document.addEventListener('click',function(e){var el=e.target.closest('.clk'); if(el && el.dataset.fid!=='') openDrawer(el.dataset.fid);});
+document.addEventListener('keydown',function(e){if(e.key==='Escape') closeDrawer();});
+// severity filtre + arama
+const active=new Set(['critical','high','medium','low','info']);
+document.querySelectorAll('.filter .fc').forEach(function(c){c.addEventListener('click',function(){
+  const s=c.dataset.sev; if(active.has(s)){active.delete(s);c.classList.add('off');}else{active.add(s);c.classList.remove('off');}
+  applyFilter();});});
+const srch=document.getElementById('fsearch'); if(srch) srch.addEventListener('input',applyFilter);
+function applyFilter(){
+  const q=((srch&&srch.value)||'').toLowerCase();
+  document.querySelectorAll('#ftable tbody tr').forEach(function(tr){
+    const okSev=active.has(tr.dataset.sev);
+    const okTxt=!q||tr.textContent.toLowerCase().indexOf(q)>-1;
+    tr.classList.toggle('hide',!(okSev&&okTxt));});
+  document.querySelectorAll('.tl .ev').forEach(function(ev){ev.style.display=active.has(ev.dataset.sev)?'':'none';});
+}
+// gorunum menusu
+document.querySelectorAll('.tab').forEach(function(b){b.addEventListener('click',function(){
+  document.querySelectorAll('.tab').forEach(function(x){x.classList.toggle('active',x===b);});
+  document.getElementById('v-exec').hidden=(b.dataset.v!=='exec');
+  document.getElementById('v-tech').hidden=(b.dataset.v!=='tech');});});
 </script>
 </body></html>"""
+    js = js.replace("__DATA__", data_json)
+    return head + drawer + js
 
 
 # ===========================================================================

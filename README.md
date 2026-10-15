@@ -75,6 +75,11 @@ Dashboard **tek sayfada iki görünüm** barındırır, üstteki menüden geçil
 - **Teknik Detay (SOC):** KPI'lar, severity dağılımı, dedektör/kaynak grafikleri,
   MITRE kapsamı, incident timeline ve kanıtlı bulgu tablosu.
 
+**İnteraktif:** bulgu tablosundaki bir satıra veya timeline'daki bir olaya tıklayınca
+yan panel (drawer) açılır — detay, kanıt satırları, **müdahale playbook'u** (adım adım)
+ve **kopyalanabilir Sigma-vari tespit kuralı**. Severity rozetleri ve arama kutusuyla
+canlı filtreleme. Hepsi offline, tek HTML.
+
 Tek URL, tek dosya — bir kuruma dağıtmak için birebir.
 
 ### VirusTotal zenginleştirme (tek tıkla IOC sorgusu)
